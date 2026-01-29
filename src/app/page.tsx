@@ -336,7 +336,7 @@ export default function Page() {
       // フォーカス移動（気持ちよさ重視）
       cy.animate({ center: { eles: node }, duration: 220 });
       cy.animate({ zoom: Math.min(1.22, cy.zoom() * 1.06), duration: 220 });
-      cy.animate({ fit: { padding: 70 }, duration: 260 });
+      cy.animate({ duration: 260, complete: () => cy.fit(undefined, 70) });
     } finally {
       setLoading(false);
     }
