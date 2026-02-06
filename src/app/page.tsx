@@ -54,11 +54,9 @@ function placeChildrenForward(cy: Core, focusId: string, childIds: string[]) {
 
   const fp = focus.position();
 
-  // focusに入ってくるedgeのsourceを「親」とみなす（今回のAPIはfocus->childのみ増えるので十分安定）
   const inEdges = focus.incomers("edge");
   const parent = inEdges.length > 0 ? inEdges[0].source() : null;
 
-  // 進行方向（親→focus）。親がなければ右へ
   let dx = 1,
     dy = 0;
   if (parent && parent.length > 0) {
@@ -70,18 +68,16 @@ function placeChildrenForward(cy: Core, focusId: string, childIds: string[]) {
   dx /= len;
   dy /= len;
 
-  // 直交方向（扇の広がり）
   const px = -dy;
   const py = dx;
 
-  const forwardDist = 200; // 前に進む距離
-  const sideGap = 70; // 左右の広がり
-  const stagger = 28; // 前後の段差（密集回避）
+  const forwardDist = 200;
+  const sideGap = 70;
+  const stagger = 28;
 
   const ids = [...childIds].sort((a, b) => a.localeCompare(b));
   const mid = (ids.length - 1) / 2;
 
-  // 既存ノードとの距離をざっくり保つ
   const minSep = 62;
 
   for (let i = 0; i < ids.length; i++) {
@@ -96,7 +92,6 @@ function placeChildrenForward(cy: Core, focusId: string, childIds: string[]) {
     let x = fp.x + dx * fd + px * side;
     let y = fp.y + dy * fd + py * side;
 
-    // 軽量な衝突回避：近い場合は前方に押し出す
     for (let k = 0; k < 8; k++) {
       let ok = true;
       cy.nodes().forEach((n) => {
@@ -157,12 +152,16 @@ export default function Page() {
     hasStartedRef.current = hasStarted;
   }, [hasStarted]);
 
+  // ★ fit/zoomの揺れを防ぐ：初期ズームを固定して、以降もfitしない
+  const BASE_ZOOM = 0.95;
+  const ZOOM_MAX = 1.18;
+
   const [elements, setElements] = useState<(KGNodeEl | KGEdgeEl)[]>([
     { data: { id: "perfume", label: "香水", kind: "root", depth: 0 } },
   ]);
 
-  // presetで自前座標（リング or forward）
-  const layout = useMemo(() => ({ name: "preset", fit: true, padding: 40 }), []);
+  // ★ layoutのfitを切る（これが一番効く）
+  const layout = useMemo(() => ({ name: "preset", fit: false, padding: 40 }), []);
 
   const style = useMemo(
     () => [
@@ -194,7 +193,6 @@ export default function Page() {
         },
       },
 
-      // rootは小さめ（びっくり防止）
       {
         selector: "node[kind = 'root']",
         style: {
@@ -207,20 +205,16 @@ export default function Page() {
         },
       },
 
-      // depthでサイズ
       { selector: "node[depth = 1]", style: { width: 56, height: 56, "font-size": 13, "shadow-opacity": 0.32 } },
       { selector: "node[depth >= 2]", style: { width: 46, height: 46, "font-size": 11, "shadow-opacity": 0.22 } },
 
-      // kindで形・色
       { selector: 'node[kind = "company"]', style: { shape: "round-rectangle", "border-color": "#60A5FA" } },
       { selector: 'node[kind = "genre"]', style: { shape: "diamond", "border-color": "#F472B6" } },
       { selector: 'node[kind = "product"]', style: { shape: "ellipse", "border-color": "#FBBF24" } },
 
-      // hover/selected
       { selector: "node:hover", style: { "border-width": 4, "shadow-opacity": 0.75 } },
       { selector: "node:selected", style: { "border-width": 4, "shadow-opacity": 0.85 } },
 
-      // edge：通常は控えめ
       {
         selector: "edge",
         style: {
@@ -243,7 +237,6 @@ export default function Page() {
         },
       },
 
-      // 強調クラス
       { selector: "edge.emph", style: { "text-opacity": 1, opacity: 1, width: 2.2 } },
       { selector: "node.emph", style: { "shadow-opacity": 0.9, "border-width": 5 } },
     ],
@@ -306,10 +299,8 @@ export default function Page() {
         ...payload.edges.map((e) => ({ data: e })),
       ];
 
-      // state更新（重複排除）
       setElements((prev) => mergeUniqueElements(prev, incoming));
 
-      // cyへ追加（追加できた要素だけフェードイン）
       let added: any = null;
       try {
         added = cy.add(incoming as any);
@@ -319,7 +310,6 @@ export default function Page() {
 
       node.data("expanded", true);
 
-      // ★配置の肝：初回はリング、それ以外は押した方向の先へ
       const childIds = payload.nodes.map((n) => n.id);
       if (focusNode.id === "perfume") {
         computeRingPositions(cy);
@@ -327,16 +317,15 @@ export default function Page() {
         placeChildrenForward(cy, focusNode.id, childIds);
       }
 
-      // “生えた感”
       if (added) {
         added.style("opacity", 0);
         added.animate({ style: { opacity: 1 } }, { duration: 260 });
       }
 
-      // フォーカス移動（気持ちよさ重視）
-      cy.animate({ center: { eles: node }, duration: 220 });
-      cy.animate({ zoom: Math.min(1.22, cy.zoom() * 1.06), duration: 220 });
-      cy.animate({ duration: 260, complete: () => cy.fit(undefined, 70) });
+      // ★fitは一切しない：center + zoomだけ
+      cy.animate({ center: { eles: node }, duration: 260 });
+      const nextZoom = Math.min(ZOOM_MAX, Math.max(BASE_ZOOM, cy.zoom() * 1.04));
+      cy.animate({ zoom: nextZoom, duration: 260 });
     } finally {
       setLoading(false);
     }
@@ -353,8 +342,9 @@ export default function Page() {
     const cy = cyRef.current;
     if (cy) {
       const root = cy.getElementById("perfume");
-      cy.animate({ center: { eles: root }, duration: 200 });
-      cy.animate({ zoom: 1.05, duration: 200 });
+      // ★開始時もfit禁止。ズーム固定 + centerのみ
+      cy.zoom(BASE_ZOOM);
+      cy.center(root);
     }
 
     await expand("perfume");
@@ -489,6 +479,8 @@ export default function Page() {
             <div style={{ fontSize: 12, opacity: 0.85, marginTop: 10, lineHeight: 1.7 }}>
               中心から外側に行くほど具体化します（会社 → ジャンル → 商品）。
               2段目以降は「押したノードの先方向」に枝が伸びていきます。
+              <br />
+              ※ズームは固定なので画面が急に拡大縮小しません
             </div>
 
             <button
@@ -523,9 +515,10 @@ export default function Page() {
         cy={(cy) => {
           cyRef.current = cy;
 
-          // 初期配置（rootのみ）
+          // 初期配置（rootのみ）＆初期ズーム固定
           cy.getElementById("perfume")?.position({ x: 0, y: 0 });
-          cy.fit(undefined, 80);
+          cy.zoom(BASE_ZOOM);
+          cy.center(cy.getElementById("perfume"));
 
           // tapをクリーンにして必要な2つだけ登録（順序重要）
           cy.off("tap");
@@ -546,8 +539,10 @@ export default function Page() {
 
             emphasizeNeighborhood(cy, id);
 
-            cy.animate({ center: { eles: n }, duration: 220 });
-            cy.animate({ zoom: Math.min(1.22, cy.zoom() * 1.06), duration: 220 });
+            // ★fitしない：center/zoomのみ（軽め）
+            cy.animate({ center: { eles: n }, duration: 240 });
+            const nextZoom = Math.min(ZOOM_MAX, Math.max(BASE_ZOOM, cy.zoom() * 1.03));
+            cy.animate({ zoom: nextZoom, duration: 240 });
 
             expand(id);
           });
